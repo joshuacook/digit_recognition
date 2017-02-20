@@ -4,8 +4,8 @@ import sys
 import random
 
 from scipy import misc
-from sklearn.preprocessing import OneHotEncoder
 from six.moves import cPickle as pickle
+from keras.utils import np_utils
 
 TRAIN_SET_SIZE = 95000
 VALID_SET_SIZE = 5000
@@ -64,13 +64,46 @@ def make_synthetic_datasets(train_set, valid_set, test_set, notmnist_datasets):
 
 
     print "one-hot encode labels: ",
-    OHE = OneHotEncoder(sparse=False)
+    
     print ".",
-    one_hot_train_labels = OHE.fit_transform(train_labels)
+    
+    y_trn_1 = train_labels[:,0]
+    y_trn_2 = train_labels[:,1]
+    y_trn_3 = train_labels[:,2]
+    y_trn_4 = train_labels[:,3]
+    y_trn_5 = train_labels[:,4]
+    
+    one_hot_train_labels = [np_utils.to_categorical(y_trn_1),
+                            np_utils.to_categorical(y_trn_2),
+                            np_utils.to_categorical(y_trn_3),
+                            np_utils.to_categorical(y_trn_4),
+                            np_utils.to_categorical(y_trn_5)]
     print ".",
-    one_hot_valid_labels = OHE.fit_transform(valid_labels)
+
+    y_tst_1 = test_labels[:,0]
+    y_tst_2 = test_labels[:,1]
+    y_tst_3 = test_labels[:,2]
+    y_tst_4 = test_labels[:,3]
+    y_tst_5 = test_labels[:,4]
+    
+    one_hot_test_labels = [np_utils.to_categorical(y_tst_1),
+                           np_utils.to_categorical(y_tst_2),
+                           np_utils.to_categorical(y_tst_3),
+                           np_utils.to_categorical(y_tst_4),
+                           np_utils.to_categorical(y_tst_5)]
     print "."
-    one_hot_test_labels = OHE.fit_transform(test_labels)
+
+    y_val_1 = valid_labels[:,0]
+    y_val_2 = valid_labels[:,1]
+    y_val_3 = valid_labels[:,2]
+    y_val_4 = valid_labels[:,3]
+    y_val_5 = valid_labels[:,4]
+    
+    one_hot_valid_labels = [np_utils.to_categorical(y_val_1),
+                            np_utils.to_categorical(y_val_2),
+                            np_utils.to_categorical(y_val_3),
+                            np_utils.to_categorical(y_val_4),
+                            np_utils.to_categorical(y_val_5)]
 
     data_dictionary = {
                        'train_set': train_set,
