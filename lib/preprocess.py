@@ -1,11 +1,18 @@
 import numpy as np
+import pandas as pd
 import os
 import sys
 import random
+import tarfile
+import h5py
 
+from scipy import ndimage
 from scipy import misc
+from six.moves.urllib.request import urlretrieve
 from six.moves import cPickle as pickle
 from keras.utils import np_utils
+import random
+from PIL import Image
 
 TRAIN_SET_SIZE = 95000
 VALID_SET_SIZE = 5000
@@ -175,3 +182,205 @@ def _make_dataset(return_set, dataset, data_set_size, input_labels):
                 return_set[i]=concatenation
                 start=end
         return return_set, labels
+
+def download_progress_hook(count, blockSize, totalSize):
+    global last_percent_reported
+    last_percent_reported = None
+    percent = int(count * blockSize * 100 / totalSize)
+    if last_percent_reported != percent:
+        if percent % 5 == 0:
+            sys.stdout.write("%s%%" % percent)
+            sys.stdout.flush()
+        else:
+            sys.stdout.write(".")
+            sys.stdout.flush()
+          
+        last_percent_reported = percent
+        
+def maybe_download(filename, url, force=False):
+    """Download a file if not present, and make sure it's the right size."""
+    if force or not os.path.exists(filename):
+        print('Attempting to download:', filename) 
+        filename, _ = urlretrieve(url + filename, filename, reporthook=download_progress_hook)
+        print('\nDownload Complete!')
+    statinfo = os.stat(filename)
+    return filename
+
+def maybe_extract(filename, force=False):
+    root = os.path.splitext(os.path.splitext(filename)[0])[0]  # remove .tar.gz
+    if os.path.isdir(root) and not force:
+        # You may override by setting force=True.
+        print('%s already present - Skipping extraction of %s.' % (root, filename))
+    else:
+        print('Extracting data for %s. This may take a while. Please wait.' % root)
+        tar = tarfile.open(filename)
+        sys.stdout.flush()
+        tar.extractall()
+        tar.close()
+    data_folders = [
+        os.path.join(root, d) for d in sorted(os.listdir(root))
+        if os.path.isdir(os.path.join(root, d))]
+    print(data_folders)
+    return data_folders
+
+def get_bounding_box(image_dict):
+    top = min(image_dict['top'])
+    left = min(image_dict['left'])
+    
+    top_and_height = [image_dict['top'], image_dict['height']]
+    left_and_width = [image_dict['left'], image_dict['width']]
+    
+    bottom =max(np.sum(top_and_height, axis=0))
+    right = max(np.sum(left_and_width,axis=0))
+    
+    return {'top': top, 'bottom': bottom, 'left':left, 'right':right}
+
+def crop_and_resize(image_path, dimensions_dict):
+    original = Image.open(image_path)
+    left = int(dimensions_dict['left'])
+    top = int(dimensions_dict['top'])
+    right = int(dimensions_dict['right'])
+    bottom =int(dimensions_dict['bottom'])
+    box = (left,top,right,bottom)
+    cropped = original.crop(box)
+    resized = cropped.resize((54, 54))
+    return resized
+
+def process_all_images(source_folder, destination_folder, images_info):
+    images_list = os.listdir(source_folder)
+    images_list.remove('digitStruct.mat')
+    images_list.remove('see_bboxes.m')
+    for image_name in images_list:
+        image_num = int(image_name[:-4]) - 1
+        processed = crop_and_resize(source_folder+image_name, get_bounding_box(images_info[image_num]))
+        processed.save(destination_folder + image_name) 
+
+import os
+
+from scipy import misc
+
+def prepare_svhn_dataset(path, info):
+    images_list = os.listdir(path)
+    png = []
+    labels = []
+    
+    for image in images_list:
+        im = misc.imread(path+image)
+        png.append(im)   
+        
+        image_num = int(image[:-4]) - 1
+        try:
+            image_label = info[image_num]['labels']
+            image_length = info[image_num]['length']
+        except IndexError:
+            continue
+        if image_length >5:
+            image_label = image_label[:5]
+        for i in range(image_length, 5):
+            image_label = np.append(image_label,0)
+        image_label = np.append(image_label,image_length)
+        labels.append(image_label)
+        
+    images = np.asarray(png)
+    labels =  np.asarray(labels)
+    
+    y_1 = labels[:,0]
+    y_2 = labels[:,1]
+    y_3 = labels[:,2]
+    y_4 = labels[:,3]
+    y_5 = labels[:,4]
+    y_6 = labels[:,5]
+
+    one_hot_labels = [np_utils.to_categorical(y_1),
+                      np_utils.to_categorical(y_2),
+                      np_utils.to_categorical(y_3),
+                      np_utils.to_categorical(y_4),
+                      np_utils.to_categorical(y_5),
+                      np_utils.to_categorical(y_6)]
+    
+    return images, one_hot_labels
+            
+def download_and_extract_svhn_datasets():
+    url = 'http://ufldl.stanford.edu/housenumbers/'
+    train_filename = maybe_download('train.tar.gz', url=url)
+    test_filename = maybe_download('test.tar.gz', url=url)
+
+    train_folder = maybe_extract(train_filename)
+    test_folder = maybe_extract(test_filename)
+
+    
+def svhn_meta_from_mat(filename):
+    """ Reads and processes the mat files provided in the SVHN dataset. 
+        Input: filename 
+        Ouptut: list of python dictionaries 
+    """
+         
+    f = h5py.File(filename, 'r')
+    groups = f['digitStruct'].items()
+    bbox_ds = np.array(groups[0][1]).squeeze()
+    names_ds = np.array(groups[1][1]).squeeze()
+ 
+    data_list = []
+    num_files = bbox_ds.shape[0]
+    count = 0
+ 
+    for objref1, objref2 in zip(bbox_ds, names_ds):
+ 
+        data_dict = {}
+ 
+        # Extract image name
+        names_ds = np.array(f[objref2]).squeeze()
+        filename = ''.join(chr(x) for x in names_ds)
+        data_dict['filename'] = filename
+ 
+        #print filename
+ 
+        # Extract other properties
+        items1 = f[objref1].items()
+ 
+        # Extract image label
+        labels_ds = np.array(items1[1][1]).squeeze()
+        try:
+            label_vals = [int(f[ref][:][0, 0]) for ref in labels_ds]
+        except TypeError:
+            label_vals = [labels_ds]
+        data_dict['labels'] = label_vals
+        data_dict['length'] = len(label_vals)
+ 
+        # Extract image height
+        height_ds = np.array(items1[0][1]).squeeze()
+        try:
+            height_vals = [f[ref][:][0, 0] for ref in height_ds]
+        except TypeError:
+            height_vals = [height_ds]
+        data_dict['height'] = height_vals
+ 
+        # Extract image left coords
+        left_ds = np.array(items1[2][1]).squeeze()
+        try:
+            left_vals = [f[ref][:][0, 0] for ref in left_ds]
+        except TypeError:
+            left_vals = [left_ds]
+        data_dict['left'] = left_vals
+ 
+        # Extract image top coords
+        top_ds = np.array(items1[3][1]).squeeze()
+        try:
+            top_vals = [f[ref][:][0, 0] for ref in top_ds]
+        except TypeError:
+            top_vals = [top_ds]
+        data_dict['top'] = top_vals
+ 
+        # Extract image width
+        width_ds = np.array(items1[4][1]).squeeze()
+        try:
+            width_vals = [f[ref][:][0, 0] for ref in width_ds]
+        except TypeError:
+            width_vals = [width_ds]
+        data_dict['width'] = width_vals
+ 
+        data_list.append(data_dict)
+ 
+        count += 1
+ 
+    return data_list
